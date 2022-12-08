@@ -1,1 +1,1 @@
-# AMS-520-FInal-Project
+# AMS-520-Final-Project
