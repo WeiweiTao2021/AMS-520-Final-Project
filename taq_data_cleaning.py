@@ -88,6 +88,61 @@ def clean_quotes(q):
     q_valid_LAQ = q_v.iloc[mask_valid_LAQ ,:]
     
     return q_valid_LAQ
+def valid_trades(t,q):
+    """
+    Takes raw trades and quoters and returns a trades dataframe with only valid trades (not sec611 or ADF trade) and
+    attaches the last active best bid and best offer at time of trade. 
+
+    Parameters:
+    -------------
+    t : pd.DataFrame
+        raw TAQ trades dataframe from csv
+    q : pd.DataFrame
+        raw TAQ quotes dataframe from csv
+    
+    Returns:
+    ---------
+    t_valid : pd.DataFrame
+        cleaned trades with numerical Participant_Timestamp (pt_secs), MOX identifier and LAQ bid/offer appended 
+
+    """
+    df_LAQ = clean_quotes(q)
+    df_LAQ = df_LAQ[['pt_secs', 'Sequence_Number', 'Best_Bid_Price', 'Best_Offer_Price']]
+    df_LAQ.reset_index(inplace=True)
+    t.sort_values(by=['Participant_Timestamp','Sequence_Number'],axis=0, inplace=True )
+    t_v = t[np.logical_and(t['Participant_Timestamp'] >= 94500000000000, t['Participant_Timestamp'] <= 154500000000000) ] 
+    t_v['pt_secs'] = t_v['Participant_Timestamp'].apply(ts_to_secs)
+    t_v = t_v.iloc[~(t_v['Exchange'] =='D').to_numpy()] ## remove ADF - trades need not obey nbbo quotes
+    t_v = t_v[ ~ (t_v['Trade_Through_Exempt_Indicator'] == 1)]
+
+    t_v['tMOX'] = t_v.groupby('Participant_Timestamp').ngroup()
+    tdiff = t_v['tMOX'].diff().to_numpy()
+    diff_mox = (tdiff ==1.0)
+    mask_natural = diff_mox[:-1] * diff_mox[1:]  # unique MOX only - solo quotes
+    mask_lasttrade = (tdiff[:-1] - tdiff[1:]) == -1.0
+
+    mask_valid_trade = np.concatenate(([False],np.logical_or(mask_natural, mask_lasttrade)))
+    t_valid = t_v.iloc[mask_valid_trade ,:]
+    df_temp = t_valid[['pt_secs', 'Sequence_Number']]
+    df_temp.sort_values('Sequence_Number', inplace=True)
+    df_temp['pt_secs'] =  t_valid['pt_secs'].to_numpy() + 1e-7 # smallest diff between pt_sec values, machine eps instead??
+    df_temp['is_trade'] = True
+    df_temp[['Best_Bid_Price', 'Best_Offer_Price']] = np.nan 
+    df_LAQ['is_trade'] = False
+
+    df_temp = df_temp.append(df_LAQ)
+    df_temp.sort_values('pt_secs', inplace=True)
+    df_temp.ffill(inplace=True)
+    df_valid_trades = df_temp[df_temp['is_trade']==True]
+    t_v.set_index('Sequence_Number', inplace=True)
+    t_v.sort_index(inplace=True)
+    df_valid_trades.set_index('Sequence_Number', inplace=True)
+    df_valid_trades.sort_index(inplace=True)
+    t_valid[['LAQ_bid','LAQ_offer']] =  df_valid_trades[['Best_Bid_Price', 'Best_Offer_Price']].to_numpy()
+    return t_valid
+
+
+
 
 
 def raw_tq2mox_old(t, q):
