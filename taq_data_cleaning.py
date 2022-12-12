@@ -398,7 +398,7 @@ def gen_targets_temporal(
 
     mask_spreadup = fbids > asks
     mask_spreaddown = fasks < bids
-    mask_spreadeq = np.logical_and(fasks >= bids,  fbids >= asks)
+    mask_spreadeq = np.logical_and(fasks >= bids,  fbids <= asks)
     time = q_valid_LAQ['pt_secs'].to_numpy()
     dict_data = {
             'id'        : q_valid_LAQ.index.to_numpy(),
