@@ -25,6 +25,7 @@ pd.options.mode.chained_assignment = None  # shaving with a machete...
 def ts_to_secs(ptimestamp):
     str_zpad = str(ptimestamp).zfill(15)
     return int(str_zpad[:2])*3600 + int(str_zpad[2:4])*60 + int(str_zpad[4:6]) + 1e-9 *float(str_zpad[6:])
+
 def ts_to_pdts(ptimestamp, dte):
     """
     dte should be day of TAQ timestamp as datetime.datetime instance
@@ -88,88 +89,6 @@ def clean_quotes(q):
     q_valid_LAQ = q_v.iloc[mask_valid_LAQ ,:]
     
     return q_valid_LAQ
-
-
-def raw_tq2mox_old(t, q):
-    """
-    Modifies raw quote and trade data. Tsimsfirst/last 15 minutes 
-    of normal trading hours. Adds MOX identifier and LAQ (Last active quote).
-
-    Parameters:
-    -------------
-    t : pd.DataFrame
-        raw TAQ trades dataframe from csv
-    q : pd.DataFrame
-        raw TAQ quotes dataframe from csv
-        
-    Returns:
-    ---------
-
-    t_v : pd.DataFrame
-        cleaned trades with MOX id , LAQ - Last active quote
-    q_v : pd.DataFrame
-        cleaned quotes with MOX id
-    """
-    t.sort_values(by=['Participant_Timestamp','Sequence_Number'], axis=0, inplace=True)
-    q.sort_values(by=['Participant_Timestamp','Sequence_Number'],axis=0, inplace=True )
-    t_v = t[np.logical_and(t['Participant_Timestamp'] >= 94500000000000, t['Participant_Timestamp'] <= 154500000000000) ] # remove closing/opening auction dissemination ( remove first and last 15 min), formally->3:50pm NYSE/NASDAQ (closing cross)
-    q_v = q[np.logical_and(q['Participant_Timestamp'] >= 94500000000000, q['Participant_Timestamp'] <= 154500000000000) ] 
-    t_v['pt_secs'] = t_v['Participant_Timestamp'].apply(ts_to_secs)
-    q_v['pt_secs'] = q_v['Participant_Timestamp'].apply(ts_to_secs)
-
-    ### Assigning MOX to trades and quotes
-    
-    mox = 1 # MOX of zero saved for exchange updated quotes versus MQUs
-    j = 0 
-    N = len(t_v)
-    t_v['MOX'] = np.full(N, np.nan, dtype=int)
-    while j < N:
-        cur_pts = t_v['Participant_Timestamp'].iloc[j]
-        while j < N and  cur_pts == t_v['Participant_Timestamp'].iloc[j]:
-            t_v['MOX'].iloc[j] = mox
-            j +=1
-        mox += 1
-    # MOX of zero saved for exchange updated quotes versus MQUs
-    j = 0 
-    N = len(q_v)
-    q_v['MOX'] = np.full(N, np.nan,dtype=int)
-    while j < N:
-        cur_pts = q_v['pt_secs'].iloc[j]
-        df_trade_moxes = t_v[t_v['pt_secs'] == cur_pts]
-        if len(df_trade_moxes) == 0 or len(df_trade_moxes) == 1: # MQU with only 1 trade/quote update
-            q_v['MOX'].iloc[j] = 0
-        else:
-            #pdb.set_trace()
-            q_v['MOX'].iloc[j] = df_trade_moxes['MOX'].iloc[0]
-        j +=1
-    t_v['LAQ_bid'] = np.zeros(len(t_v))
-    t_v['LAQ_offer'] = np.zeros(len(t_v))
-    t_v['LAQ_pt'] = np.zeros(len(t_v))
-    t_v['LAQ_bid_size'] = np.zeros(len(t_v))
-    t_v['LAQ_offer_size'] = np.zeros(len(t_v))
-    ## mask for last MQU or natural quotes only
-
-    mask_natural = (q_v['MOX'] == 0).to_numpy()
-    mask_lastmqu = np.concatenate(([True], mask_natural[1:]))
-    mask_valid_LAQ = np.logical_or(mask_natural, mask_lastmqu)
-    q_valid_LAQ = q_v.iloc[mask_valid_LAQ,:]
-    for i in t_v.index.to_numpy():
-        cur_pt = t_v['pt_secs'].loc[i]
-
-        try:
-            vquotes = q_valid_LAQ[np.logical_and(q_valid_LAQ['pt_secs'] >= cur_pt - 0.1, q_valid_LAQ['pt_secs'] <= cur_pt )].iloc[-1]
-            t_v['LAQ_bid'].loc[i] = vquotes['Best_Bid_Price'] 
-            t_v['LAQ_offer'].loc[i] = vquotes['Best_Offer_Price']  
-            t_v['LAQ_bid_size'].loc[i] = vquotes['Best_Bid_Size'] 
-            t_v['LAQ_offer_size'].loc[i] = vquotes['Best_Offer_Size']  
-            t_v['LAQ_pt'].loc[i] = vquotes['pt_secs'] 
-        except:
-            t_v['LAQ_bid'].loc[i] = np.nan
-            t_v['LAQ_offer'].loc[i] = np.nan 
-            t_v['LAQ_pt'].loc[i] = np.nan
-            t_v['LAQ_bid_size'].loc[i] =np.nan
-            t_v['LAQ_offer_size'].loc[i] = np.nan
-    return t_v, q_v
 
 
 def gen_basic_features_TAQ(t_v, q_v, day=datetime.datetime(2020,1,6),
@@ -316,15 +235,19 @@ def gen_targets_events(q_v, num_events=30,
     q_valid_LAQ['Best_Mid_Price'] = (q_valid_LAQ['Best_Bid_Price'] + q_valid_LAQ['Best_Offer_Price'])/2.0
     # find mid-price up moves
     mids = q_valid_LAQ['Best_Mid_Price'].to_numpy()
+    
     mask_midup = (mids[num_events:] > mids[:-num_events])
     mask_middown = (mids[num_events:] < mids[:-num_events])
     mask_mideq = (mids[num_events:] == mids[:-num_events])
+    
     #np.sum(mask_midup), np.sum(mask_middown), np.sum(mask_mideq), 
     bids = q_valid_LAQ['Best_Bid_Price'].to_numpy()
     asks = q_valid_LAQ['Best_Offer_Price'].to_numpy()
-    mask_spreadup = (bids[num_events:] > asks[:-num_events])
-    mask_spreaddown = (asks[num_events:] < bids[:-num_events])
-    mask_spreadeq = (asks[num_events:] >= bids[:-num_events])
+    
+    mask_spreadup = (bids[num_events:] > asks[:-num_events]) # old sell < new buy
+    mask_spreaddown = (asks[num_events:] < bids[:-num_events]) # new sell  < old buy
+    mask_spreadeq = (asks[num_events:] >= bids[:-num_events]) & (bids[num_events:] <= asks[:-num_events]) # (old buy < new sell) and (new sell > old buy)
+    
     time = q_valid_LAQ['pt_secs'].to_numpy()[:-num_events]
     dict_data = {
             'id'        : q_valid_LAQ['Sequence_Number'][:-num_events],
