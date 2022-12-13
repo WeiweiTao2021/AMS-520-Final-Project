@@ -1,4 +1,4 @@
-# AMS-520-Final-Project
+# Model mid-price dynamics of high-frequency limit order book using XGB and RF with spline transformation
 
 In this project, we are aiming to build classification models to predict the dynamics of mid-price and price spread of limit order book. The data we used is the high-frequency tranding and quote data for APPL on Jan 06. 
 
